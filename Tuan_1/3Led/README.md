@@ -1,6 +1,7 @@
+**Kết nối đơn giản với 3 led và điều khiển theo trình tự lần lượt các đèn sáng tối**
+
 Hình ảnh:
 ![3led](https://github.com/user-attachments/assets/5e0dd3b7-0b98-4539-bf8a-ab6b1234c48c)
-
 
 Video kết quả:
 <div style="display: flex; justify-content: center; align-items: center;">
