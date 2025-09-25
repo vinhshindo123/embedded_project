@@ -1,4 +1,4 @@
-**Dữ án kết hợp các cảm biến**
+## **Dữ án kết hợp các cảm biến**
 Dự án nhằm ôn luyện kiến thức ADC (Analog to Digital Converte)
 Cảm biến sử dụng:
 - DTH11 đo cảm biến nhiệt độ, độ ẩm -> khi nhiệt độ lớn hơn 35 độ C thì cảnh báo, mở cửa, bật quạt
