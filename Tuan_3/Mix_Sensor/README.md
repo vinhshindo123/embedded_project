@@ -18,10 +18,10 @@ Dự án hoạt động dựa trên các ngưỡng giá trị (thresholds) đư�
     + Phát cảnh báo bằng Còi báo trong 2 giây.
     + LCD hiển thị thông báo: Troi toi bat den.
 3. Cảnh báo Nguy cơ (Nước và Âm thanh)
-* Cảnh báo Mực nước:
+3.1. Cảnh báo Mực nước:
 - Điều kiện: Giá trị đọc từ Cảm biến Nước lớn hơn 300 (Mực nước cao hoặc phát hiện rò rỉ).
 - Hành động: LCD hiển thị CANH BAO!/Muc nuoc cao! và bật Còi báo 1 giây.
-* Cảnh báo Âm thanh:
+3.2. Cảnh báo Âm thanh:
 - Điều kiện: Giá trị đọc từ Cảm biến Âm thanh lớn hơn 190 (Âm thanh quá lớn).
 - Hành động: LCD hiển thị CANH BAO!/Am thanh qua lon! và bật Còi báo 1 giây.
 
