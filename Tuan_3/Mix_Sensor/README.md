@@ -7,16 +7,16 @@ Dự án hoạt động dựa trên các ngưỡng giá trị (thresholds) đư�
 1. Điều khiển Nhiệt độ và Thông gió
 - Điều kiện kích hoạt: Nếu Nhiệt độ (T) lớn hơn 35∘C.
 - Hành động:
-+ Bật Động cơ DC (mô phỏng bật quạt).
-+ Mở Servo Motor đến góc 90∘ (mô phỏng mở cửa sổ/cửa thông gió).
-+ Phát cảnh báo bằng Còi báo trong 2 giây.
-+ LCD hiển thị thông báo: Temp > 35C / Bat quat! Mo cua!.
+    + Bật Động cơ DC (mô phỏng bật quạt).
+    + Mở Servo Motor đến góc 90∘ (mô phỏng mở cửa sổ/cửa thông gió).
+    + Phát cảnh báo bằng Còi báo trong 2 giây.
+    + LCD hiển thị thông báo: Temp > 35C / Bat quat! Mo cua!.
 2. Điều khiển Ánh sáng Tự động
 - Điều kiện kích hoạt: Nếu giá trị đọc từ Cảm biến LDR (Ánh sáng) nhỏ hơn 300 (Trời tối).
 - Hành động:
-+ Bật Đèn LED (mô phỏng bật đèn nhà).
-+ Phát cảnh báo bằng Còi báo trong 2 giây.
-+ LCD hiển thị thông báo: Troi toi bat den.
+    + Bật Đèn LED (mô phỏng bật đèn nhà).
+    + Phát cảnh báo bằng Còi báo trong 2 giây.
+    + LCD hiển thị thông báo: Troi toi bat den.
 3. Cảnh báo Nguy cơ (Nước và Âm thanh)
 * Cảnh báo Mực nước:
 - Điều kiện: Giá trị đọc từ Cảm biến Nước lớn hơn 300 (Mực nước cao hoặc phát hiện rò rỉ).
