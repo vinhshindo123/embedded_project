@@ -1,159 +1,364 @@
+#include <SPI.h>
+#include <MFRC522.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+#include <EEPROM.h>
 
-// Khởi tạo LCD
+#define SS_PIN 10
+#define RST_PIN 9
+#define IR_PIN 7
+#define TRIG_PIN 4
+#define ECHO_PIN 2
+#define BUZZER_PIN 6
+#define SERVO_PIN 8
+
+struct ObjectData {
+    byte uid[4];
+    char name[16];
+    int distance_cm;
+    bool is_registered;
+};
+
+const int MAX_SLOTS = 5;
+const int DATA_SIZE = sizeof(ObjectData);
+const int EEPROM_BASE = 0;
+
+enum SystemState {
+    IDLE = 0,
+    DETECTED = 1,
+    VERIFYING = 2
+};
+
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+MFRC522 rfid(SS_PIN, RST_PIN);
+Servo controlServo;
 
-// Định nghĩa chân cắm
-const int POT_PIN = A0;   // Chân biến trở
-const int BUZ_PIN = 10;   // Chân còi báo (PWM)
-const int LED_RED = 9;    // Chân màu Đỏ (PWM)
-const int LED_GREEN = 6;  // Chân màu Xanh lá cây (PWM)
-const int LED_BLUE = 5;   // Chân màu Xanh dương (PWM)
-const int BTN_PIN = 2;    // Chân nút nhấn
+SystemState currentState = IDLE;
+unsigned long lastActivityTime = 0;
+ObjectData currentItem;
+const int DISTANCE_TOLERANCE = 1;
 
-// Biến toàn cục
-int secret_number;
-int guess_count = 0;
-int player_guess_value;
+void resetSystem();
+void servoOpen();
+void servoClose();
+void buzz(int freq, int duration);
+long measureDistance();
+void eepromWriteData(int slot, const ObjectData *data);
+void eepromReadData(int slot, ObjectData *data);
+ObjectData getObjectDataByUID(byte *uid);
+void handleSerialCommands();
+void handleIdleState();
+void handleDetectedState();
+void handleVerifyingState();
+void printUID(byte *uid);
 
-// Đặt giá trị cho vùng đệm (deadband)
-const int DEAD_BAND = 3;
 
 void setup() {
-  pinMode(LED_RED, OUTPUT);
-  pinMode(LED_GREEN, OUTPUT);
-  pinMode(LED_BLUE, OUTPUT);
-  pinMode(BUZ_PIN, OUTPUT);
-  pinMode(BTN_PIN, INPUT_PULLUP);
+    Serial.begin(9600);
+    pinMode(IR_PIN, INPUT_PULLUP);
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+    
+    lcd.init();
+    lcd.backlight();
+    SPI.begin();
+    rfid.PCD_Init();
 
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-
-  randomSeed(analogRead(A1));
-  newGame();
+    controlServo.attach(SERVO_PIN);
+    
+    resetSystem();
+    Serial.println("System Initialized. Use commands: REG, DELALL, LIST");
 }
 
 void loop() {
-  // 1. Đọc và chuyển đổi giá trị biến trở
-  int raw_value = analogRead(POT_PIN);
-  player_guess_value = map(raw_value, 0, 1023, 0, 255);
-
-  // 2. Hiển thị thông tin lên LCD
-  lcd.setCursor(0, 0);
-  lcd.print("Ban doan: ");
-  lcd.print(player_guess_value);
-  lcd.print("    ");
-
-  // 3. Cung cấp gợi ý (lớn hơn/nhỏ hơn)
-  if (player_guess_value < secret_number - 50) {
-    lcd.setCursor(0, 1);
-    lcd.print("Gia tri nho hon");
-  } else if (player_guess_value > secret_number + 50) {
-    lcd.setCursor(0, 1);
-    lcd.print("Lon hon!       ");
-  } else {
-    // Nếu giá trị chính xác, hiển thị "OK"
-    lcd.setCursor(0, 1);
-    lcd.print("Gan dung roi!   ");
-  }
-
-  // 4. Phản hồi màu sắc và âm thanh
-  int diff = abs(player_guess_value - secret_number);
-
-  if ((player_guess_value >= 0 && player_guess_value <= 5) || (player_guess_value >= 249 && player_guess_value <= 254)) {
-    // Giá trị ở hai đầu dải đo: Đỏ
-    setColor(255, 0, 0); 
-  } else if ((player_guess_value >= 6 && player_guess_value < secret_number - 50) || (player_guess_value <= 248 && player_guess_value > secret_number + 50)) {
-    // Khoảng từ 6 đến cách điểm đích trên dưới 50: Vàng
-    setColor(255, 255, 0);
-  } else if ((player_guess_value >= secret_number - 50 && player_guess_value < secret_number - 30) || (player_guess_value <= secret_number + 50 && player_guess_value > secret_number + 30)) {
-    // Khoảng từ cách điểm đích trên dưới 50 đến 30: Xanh da trời
-    setColor(0, 255, 255);
-  } else {
-    // Còn lại (trong khoảng trên dưới 30): Xanh lá cây
-    setColor(0, 255, 0); 
-  }
-
-  analogWrite(BUZ_PIN, player_guess_value);
-
-  // 5. Kiểm tra nút nhấn để xác nhận đoán và quyết định thắng/thua
-  if (digitalRead(BTN_PIN) == LOW) {
-    delay(50); // Chống dội nút
-    if (digitalRead(BTN_PIN) == LOW) {
-      guess_count++;
-      
-      if (abs(player_guess_value - secret_number) <= DEAD_BAND) {
-        winGame();
-      } else {
-        // Nếu đoán sai, thông báo và cho người chơi tiếp tục
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Ban doan sai!");
-        setColor(255, 0, 0);
-
-        // Còi cảnh báo cao 2 lần
-        analogWrite(BUZ_PIN, 254);
-        delay(500);
-        analogWrite(BUZ_PIN, 0);
-        delay(600);
-        analogWrite(BUZ_PIN, 254);
-        delay(500);
-        analogWrite(BUZ_PIN, 0);
-
-        setColor(0, 0, 0);
-        delay(1500);
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Ban doan: ");
-        lcd.print(player_guess_value);
-      }
-      
-      while (digitalRead(BTN_PIN) == LOW);
+    if (currentState != IDLE && (millis() - lastActivityTime > 2000)) {
+        buzz(1000, 300); 
+        Serial.println("Timeout: Resetting to IDLE.");
+        resetSystem();
+        return; 
     }
-  }
+    
+    switch (currentState) {
+        case IDLE:
+            handleIdleState();
+            break;
+        case DETECTED:
+            handleDetectedState();
+            break;
+        case VERIFYING:
+            handleVerifyingState();
+            break;
+    }
+
+    handleSerialCommands();
 }
 
-void setColor(int redValue, int greenValue, int blueValue) {
-  analogWrite(LED_RED, 255 - redValue);
-  analogWrite(LED_GREEN, 255 - greenValue);
-  analogWrite(LED_BLUE, 255 - blueValue);
+void servoOpen() {
+    controlServo.write(0);
 }
 
-void newGame() {
-  secret_number = random(0, 256);
-  guess_count = 0;
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Hay doan so!");
-  lcd.setCursor(0, 1);
-  lcd.print("Luot: 0        ");
+void servoClose() {
+    controlServo.write(90);
 }
 
-void winGame() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Chien thang!");
-  lcd.setCursor(0, 1);
-  lcd.print("Luot: ");
-  lcd.print(guess_count);
-  
-  // Hiệu ứng nhấp nháy nhiều màu và tiếng bíp
-  for (int i = 0; i < 5; i++) {
-    setColor(255, 0, 0); // Đỏ
-    tone(BUZ_PIN, 500);
-    delay(200);
-    setColor(0, 255, 0); // Xanh lá
-    tone(BUZ_PIN, 1000);
-    delay(200);
-    setColor(0, 0, 255); // Xanh dương
-    tone(BUZ_PIN, 1500);
-    delay(200);
-    noTone(BUZ_PIN);
-  }
-  
-  setColor(0, 0, 0); // Tắt đèn
-  delay(1000);
-  newGame();
+void buzz(int freq, int duration) {
+    tone(BUZZER_PIN, freq, duration);
+}
+
+long measureDistance() {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+    
+    // Thêm timeout để tránh bị treo nếu không nhận được xung
+    long duration = pulseIn(ECHO_PIN, HIGH, 30000); 
+    
+    if (duration == 0) return 999; 
+
+    return duration * 0.034 / 2;
+}
+
+void resetSystem() {
+    currentState = IDLE;
+    lastActivityTime = millis();
+    servoOpen();
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("SYSTEM READY");
+    lcd.setCursor(0, 1);
+    lcd.print("Access OPEN");
+}
+
+void eepromWriteData(int slot, const ObjectData *data) {
+    int addr = EEPROM_BASE + slot * DATA_SIZE;
+    EEPROM.put(addr, *data);
+}
+
+void eepromReadData(int slot, ObjectData *data) {
+    int addr = EEPROM_BASE + slot * DATA_SIZE;
+    EEPROM.get(addr, *data);
+}
+
+ObjectData getObjectDataByUID(byte *uid) {
+    ObjectData temp;
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        eepromReadData(i, &temp);
+        if (temp.is_registered) {
+            bool match = true;
+            for (int j = 0; j < 4; j++) {
+                if (temp.uid[j] != uid[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return temp;
+        }
+    }
+    ObjectData notFound = { {0, 0, 0, 0}, "Not Found", 0, false };
+    return notFound;
+}
+
+void handleIdleState() {
+    if (digitalRead(IR_PIN) == LOW) { 
+        currentState = DETECTED;
+        lastActivityTime = millis();
+        Serial.println("!!! Object Detected by IR. Locking access.");
+        servoClose();
+        buzz(500, 100); 
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Object Removed!");
+        lcd.setCursor(0, 1);
+        lcd.print("Scan Tag To ID");
+    }
+}
+
+void handleDetectedState() {
+    if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+        byte *uid = rfid.uid.uidByte;
+        currentItem = getObjectDataByUID(uid); 
+        
+        if (currentItem.is_registered) {
+            currentState = VERIFYING;
+            lastActivityTime = millis();
+            buzz(1200, 100);
+            lcd.clear();
+            lcd.print("Tag OK: ");
+            lcd.print(currentItem.name);
+            lcd.setCursor(0, 1);
+            lcd.print("Checking Shape...");
+        } else {
+            buzz(300, 300);
+            lcd.setCursor(0, 1);
+            lcd.print("! Access Denied !");
+            delay(1000); 
+            lcd.setCursor(0, 1);
+            lcd.print("Scan Tag To ID");
+            lastActivityTime = millis(); 
+        }
+        rfid.PICC_HaltA();
+        rfid.PCD_StopCrypto1();
+    }
+}
+
+void handleVerifyingState() {
+    long currentDist = measureDistance();
+    
+    if (abs(currentDist - currentItem.distance_cm) <= DISTANCE_TOLERANCE) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Verification OK!");
+        lcd.setCursor(0, 1);
+        lcd.print(currentItem.name);
+        
+        buzz(1800, 200);
+        servoOpen(); 
+        delay(3000); 
+        resetSystem();
+    } else {
+        lcd.clear();
+        lcd.print("Shape Mismatch!");
+        lcd.setCursor(0, 1);
+        lcd.print("Act:");
+        lcd.print(currentDist);
+        lcd.print(" Exp:");
+        lcd.print(currentItem.distance_cm);
+        
+        buzz(400, 500);
+        delay(3000);
+        
+        currentState = DETECTED; 
+        lastActivityTime = millis();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("! Mismatch Error !");
+        lcd.setCursor(0, 1);
+        lcd.print("Scan Tag To ID");
+    }
+}
+
+void printUID(byte *uid) {
+    for (int i = 0; i < 4; i++) {
+        if (uid[i] < 0x10) Serial.print("0");
+        Serial.print(uid[i], HEX);
+        if (i < 3) Serial.print(":");
+    }
+}
+
+void handleSerialCommands() {
+    if (!Serial.available()) return;
+
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    cmd.toUpperCase(); 
+    
+    if (cmd == "DELALL") {
+        ObjectData empty = { {0, 0, 0, 0}, "", 0, false };
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            eepromWriteData(i, &empty);
+        }
+        Serial.println(">>> SUCCESS: All EEPROM slots cleared (DELALL).");
+        return;
+    }
+    
+    if (cmd == "LIST") {
+        Serial.println("--- EEPROM Registered Items ---");
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            ObjectData item;
+            eepromReadData(i, &item);
+            Serial.print("Slot ");
+            Serial.print(i);
+            Serial.print(": ");
+            if (item.is_registered) {
+                Serial.print("UID=");
+                printUID(item.uid);
+                Serial.print(", Name=");
+                Serial.print(item.name);
+                Serial.print(", Dist=");
+                Serial.print(item.distance_cm);
+                Serial.println("cm");
+            } else {
+                Serial.println("EMPTY");
+            }
+        }
+        Serial.println("---------------------------------");
+        return;
+    }
+
+
+    if (cmd.startsWith("REG ")) {
+        String fullCmd = cmd.substring(4); 
+        
+        int comma1 = fullCmd.indexOf(',');
+        int comma2 = fullCmd.indexOf(',', comma1 + 1);
+
+        if (comma1 == -1 || comma2 == -1) {
+            Serial.println("Error: Invalid format. Use REG <UID>,<Name>,<Dist>");
+            return;
+        }
+
+        String uidStr = fullCmd.substring(0, comma1);
+        String nameStr = fullCmd.substring(comma1 + 1, comma2);
+        String distStr = fullCmd.substring(comma2 + 1);
+
+        uidStr.trim();
+        nameStr.trim();
+        distStr.trim();
+
+        if (uidStr.length() != 11) {
+            Serial.println("Error: UID format must be XX:XX:XX:XX (11 chars).");
+            return;
+        }
+
+        byte uid[4];
+        for (int i = 0; i < 4; i++) {
+            String hx = uidStr.substring(i * 3, i * 3 + 2); 
+            if (hx.length() < 2) {
+                Serial.println("Error: UID conversion failed.");
+                return;
+            }
+            uid[i] = (byte)strtol(hx.c_str(), NULL, 16);
+        }
+
+        int distance = distStr.toInt();
+        if (distance == 0) {
+            Serial.println("Error: Distance must be a number > 0.");
+            return;
+        }
+        
+        ObjectData newData;
+        memcpy(newData.uid, uid, 4);
+        nameStr.toCharArray(newData.name, 16);
+        newData.distance_cm = distance;
+        newData.is_registered = true;
+
+        int emptySlot = -1;
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            ObjectData temp;
+            eepromReadData(i, &temp);
+            if (!temp.is_registered) { 
+                emptySlot = i;
+                break;
+            }
+        }
+
+        if (emptySlot != -1) {
+            eepromWriteData(emptySlot, &newData);
+            Serial.print("SUCCESS: Registered ");
+            Serial.print(newData.name);
+            Serial.print(" to slot ");
+            Serial.print(emptySlot);
+            Serial.print(" with Dist ");
+            Serial.print(distance);
+            Serial.println("cm.");
+        } else {
+            Serial.println("ERROR: No empty registration slots available. Use DELALL to reset.");
+        }
+    } else {
+        Serial.println("Cmd? Use: REG <UID>,<Name>,<Dist> | DELALL | LIST");
+    }
 }
